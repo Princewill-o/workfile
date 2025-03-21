@@ -2,19 +2,17 @@ import java.io.*;
 import java.net.*;
 
 public class HTTPServer {
+
     private static final int PORT = 8080;
-    private static final String WEB_ROOT = "www"; // Directory for HTML files
+    private static final String WEB_ROOT = "www"; // Directory for serving HTML files
 
-    public static void main(String[] args) {
-        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
-            System.out.println("HTTP Server is listening on port " + PORT);
+    public static void main(String[] args) throws IOException {
+        ServerSocket serverSocket = new ServerSocket(PORT);
+        System.out.println("HTTP Server is listening on port " + PORT);
 
-            while (true) {
-                Socket clientSocket = serverSocket.accept();
-                new Thread(new ClientHandler(clientSocket)).start(); // Handle each client in a separate thread
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
+        while (true) {
+            Socket clientSocket = serverSocket.accept();
+            new Thread(new ClientHandler(clientSocket)).start(); // Handle each request in a new thread
         }
     }
 
@@ -27,10 +25,10 @@ public class HTTPServer {
 
         @Override
         public void run() {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-                 OutputStream out = clientSocket.getOutputStream()) {
-
-                // Read HTTP request line
+            try (
+                BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                OutputStream out = clientSocket.getOutputStream()
+            ) {
                 String requestLine = reader.readLine();
                 if (requestLine == null) return;
 
@@ -42,10 +40,9 @@ public class HTTPServer {
 
                 String requestedPath = tokens[1];
                 if (requestedPath.equals("/")) {
-                    requestedPath = "/index.html"; // Default page
+                    requestedPath = "/index.html";
                 }
 
-                // Prevent directory traversal attacks
                 if (requestedPath.contains("..")) {
                     sendResponse(out, 403, "Forbidden", "<h1>403 Forbidden</h1>");
                     return;
@@ -79,10 +76,7 @@ public class HTTPServer {
         }
 
         private void sendFileResponse(OutputStream out, File file) throws IOException {
-            byte[] fileBytes = new byte[(int) file.length()];
-            try (FileInputStream fis = new FileInputStream(file)) {
-                fis.read(fileBytes);
-            }
+            byte[] fileBytes = java.nio.file.Files.readAllBytes(file.toPath());
             PrintWriter writer = new PrintWriter(out);
             writer.println("HTTP/1.1 200 OK");
             writer.println("Content-Type: text/html");
