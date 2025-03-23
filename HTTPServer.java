@@ -1,168 +1,74 @@
-import java.io.*;
-import java.net.*;
-import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.net.ServerSocket;
+import java.net.Socket;
 
 public class HTTPServer {
 
     public static void main(String[] args) throws IOException {
-        int port = 18080;  // Listen on port 18080
+        // Port 18080 as per the coursework challenge
+        int port = 18080;
 
-        System.out.println("Opening the HTTP server socket on port " + port);
+        // The server listens on port 18080
+        System.out.println("Opening the server socket on port " + port);
         ServerSocket serverSocket = new ServerSocket(port);
 
+        // Server waits for client connections
         System.out.println("Server waiting for client...");
-        while (true) {
-            // Wait for a connection and hand it off to a new thread
-            Socket clientSocket = serverSocket.accept();
-            System.out.println("Client connected!");
+        Socket clientSocket = serverSocket.accept();
+        System.out.println("Client connected!");
 
-            // Create a new thread to handle the client
-            new Thread(new ClientHandler(clientSocket)).start();
-        }
-    }
-}
+        // Create readers and writers to communicate with the client
+        BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+        Writer writer = new OutputStreamWriter(clientSocket.getOutputStream());
 
-class ClientHandler implements Runnable {
-    private Socket clientSocket;
+        // Read the first line of the request (method, path, and HTTP version)
+        String requestLine = reader.readLine();
+        System.out.println("Request: " + requestLine);
 
-    public ClientHandler(Socket clientSocket) {
-        this.clientSocket = clientSocket;
-    }
+        // Split the request line into components (method, path, and HTTP version)
+        String[] requestParts = requestLine.split(" ");
+        String method = requestParts[0];
+        String path = requestParts[1];
 
-    @Override
-    public void run() {
-        try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-            Writer writer = new OutputStreamWriter(clientSocket.getOutputStream());
-
-            // Read the first line of the HTTP request (method, path, HTTP version)
-            String requestLine = reader.readLine();
-            
-            // Check if the requestLine is null (client closed connection or sent empty request)
-            if (requestLine == null) {
-                System.out.println("Received empty or invalid request, closing connection.");
-                sendErrorResponse(writer, 400, "Bad Request");
-                clientSocket.close();
-                return;  // Exit the method early if the request is invalid
-            }
-
-            System.out.println("Received request: " + requestLine);
-
-            // Split the request line by spaces
-            String[] requestParts = requestLine.split(" ");
-            
-            // Ensure that the request has the expected format (method, path, and HTTP version)
-            if (requestParts.length < 3) {
-                System.out.println("Malformed request line, responding with 400 Bad Request");
-                sendErrorResponse(writer, 400, "Bad Request");
-                clientSocket.close();
-                return;
-            }
-
-            // Read the headers (finish when we encounter an empty line)
-            String headerLine;
-            while ((headerLine = reader.readLine()) != null && !headerLine.isEmpty()) {
-                System.out.println("Header: " + headerLine);  // Print the headers
-            }
-
-            // Process the request based on the method and path
-            if (requestParts[0].equalsIgnoreCase("GET")) {
-                String path = requestParts[1];  // The requested path (e.g., /index.html)
-
-                // Sanitize the path to prevent directory traversal attacks
-                path = sanitizePath(path);
-
-                // If the path is root or index.html, serve the file
-                if (path.equals("/") || path.equals("/index.html")) {
-                    serveFile(writer, "index.html", 200);
-                } else {
-                    serveFile(writer, path.substring(1), 400);  // Remove the leading '/'
-                }
-            } else {
-                // If the method is not GET
-                System.out.println("Method is not GET, responding with 405 Method Not Allowed");
-                sendErrorResponse(writer, 405, "Method Not Allowed");
-            }
-
-            clientSocket.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    // Method to sanitize the path and prevent directory traversal
-    private String sanitizePath(String path) {
-        // Remove any '..' and normalize the path to avoid directory traversal
-        Path sanitizedPath = Paths.get(path).normalize();
-
-        // Ensure the path is within the "webroot" directory (e.g., current working directory)
-        Path webRoot = Paths.get("webroot");  // Use a specific directory for the server files
-        Path absolutePath = webRoot.resolve(sanitizedPath).toAbsolutePath();
-
-        // Check if the absolute path is within the "webroot" directory
-        if (!absolutePath.startsWith(webRoot.toAbsolutePath())) {
-            return null;  // Path is outside the allowed directory, reject it
+        // Read the rest of the headers
+        String header;
+        while ((header = reader.readLine()) != null && !header.isEmpty()) {
+            System.out.println("Header: " + header);
         }
 
-        return sanitizedPath.toString();  // Return the sanitized and valid path
-    }
-
-    // Method to serve files or return an error
-    private void serveFile(Writer writer, String filePath, int statusCode) {
-        Path path = Paths.get(filePath);
-        File file = path.toFile();
-
-        // Check if the file exists
-        if (file.exists() && file.isFile()) {
-            try {
-                // Read the file content and send it in the response
-                byte[] fileContent = Files.readAllBytes(path);
-
-                // Determine the MIME type based on the file extension (basic handling)
-                String contentType = "text/html";
-                if (filePath.endsWith(".html")) {
-                    contentType = "text/html";
-                } else if (filePath.endsWith(".css")) {
-                    contentType = "text/css";
-                } else if (filePath.endsWith(".js")) {
-                    contentType = "application/javascript";
-                } else if (filePath.endsWith(".jpg") || filePath.endsWith(".jpeg")) {
-                    contentType = "image/jpeg";
-                } else if (filePath.endsWith(".png")) {
-                    contentType = "image/png";
-                }
-
-                // Respond with 200 OK and the file content
-                writer.write("HTTP/1.1 " + statusCode + " OK\n");
-                writer.write("Content-Type: " + contentType + "\n");
-                writer.write("Content-Length: " + fileContent.length + "\n");
-                writer.write("\n");
-                writer.write(new String(fileContent)); // Send the file content
-                writer.flush();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+        // Check if the method is GET
+        if (!method.equals("GET")) {
+            // If method is not GET, return a 405 Method Not Allowed response
+            writer.write("HTTP/1.1 405 Method Not Allowed\r\n");
+            writer.write("Content-Type: text/html\r\n");
+            writer.write("\r\n");
+            writer.write("<html><body><h1>405 Method Not Allowed</h1></body></html>");
+            writer.flush();
         } else {
-            // If the file does not exist, respond with 404 Not Found
-            try {
-                writer.write("HTTP/1.1 404 Not Found\n");
-                writer.write("Content-Type: text/html\n");
-                writer.write("\n");
-                writer.write("<html><body><h1>404 Not Found</h1></body></html>");
+            // Handle the requested path
+            if (path.equals("/") || path.equals("/index.html")) {
+                // Return HTTP 200 with a simple HTML page
+                writer.write("HTTP/1.1 200 OK\r\n");
+                writer.write("Content-Type: text/html\r\n");
+                writer.write("\r\n");
+                writer.write("<html><body><h1>Welcome to the Home Page</h1></body></html>");
                 writer.flush();
-            } catch (IOException e) {
-                e.printStackTrace();
+            } else {
+                // Return HTTP 400 for invalid paths
+                writer.write("HTTP/1.1 400 Bad Request\r\n");
+                writer.write("Content-Type: text/html\r\n");
+                writer.write("\r\n");
+                writer.write("<html><body><h1>400 Bad Request</h1></body></html>");
+                writer.flush();
             }
         }
-    }
 
-    // Helper method to send error responses
-    private void sendErrorResponse(Writer writer, int statusCode, String statusMessage) throws IOException {
-        writer.write("HTTP/1.1 " + statusCode + " " + statusMessage + "\n");
-        writer.write("Content-Type: text/html\n");
-        writer.write("\n");
-        writer.write("<html><body><h1>" + statusMessage + "</h1></body></html>");
-        writer.flush();
+        // Close the client connection
+        clientSocket.close();
+        serverSocket.close();
     }
 }
