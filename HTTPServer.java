@@ -9,23 +9,24 @@ import java.net.Socket;
 public class HTTPServer {
 
     public static void main(String[] args) throws IOException {
-        // Port 18080 as per the coursework challenge
+
+        // Change port to 18080 as specified in the coursework
         int port = 18080;
 
-        // The server listens on port 18080
+        // Creating a ServerSocket to listen on port 18080
         System.out.println("Opening the server socket on port " + port);
         ServerSocket serverSocket = new ServerSocket(port);
 
-        // Server waits for client connections
+        // The server waits for incoming client connections
         System.out.println("Server waiting for client...");
         Socket clientSocket = serverSocket.accept();
         System.out.println("Client connected!");
 
-        // Create readers and writers to communicate with the client
+        // Create readers and writers for client communication
         BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
         Writer writer = new OutputStreamWriter(clientSocket.getOutputStream());
 
-        // Read the first line of the request (method, path, and HTTP version)
+        // Read the first line of the request (HTTP method, path, and version)
         String requestLine = reader.readLine();
         System.out.println("Request: " + requestLine);
 
@@ -34,7 +35,7 @@ public class HTTPServer {
         String method = requestParts[0];
         String path = requestParts[1];
 
-        // Read the rest of the headers
+        // Read the rest of the headers (skip the blank line)
         String header;
         while ((header = reader.readLine()) != null && !header.isEmpty()) {
             System.out.println("Header: " + header);
@@ -42,7 +43,7 @@ public class HTTPServer {
 
         // Check if the method is GET
         if (!method.equals("GET")) {
-            // If method is not GET, return a 405 Method Not Allowed response
+            // If method is not GET, return 405 Method Not Allowed
             writer.write("HTTP/1.1 405 Method Not Allowed\r\n");
             writer.write("Content-Type: text/html\r\n");
             writer.write("\r\n");
