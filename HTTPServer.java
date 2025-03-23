@@ -6,7 +6,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 public class HTTPServer {
 
     public static void main(String[] args) throws IOException {
-        int port = 8080;  // Listen on port 8080
+        int port = 18080;  // Listen on port 8080
 
         System.out.println("Opening the HTTP server socket on port " + port);
         ServerSocket serverSocket = new ServerSocket(port);
