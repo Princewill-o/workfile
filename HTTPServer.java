@@ -38,10 +38,27 @@ class ClientHandler implements Runnable {
 
             // Read the first line of the HTTP request (method, path, HTTP version)
             String requestLine = reader.readLine();
+            
+            // Check if the requestLine is null (client closed connection or sent empty request)
+            if (requestLine == null) {
+                System.out.println("Received empty or invalid request, closing connection.");
+                sendErrorResponse(writer, 400, "Bad Request");
+                clientSocket.close();
+                return;  // Exit the method early if the request is invalid
+            }
+
             System.out.println("Received request: " + requestLine);
 
             // Split the request line by spaces
             String[] requestParts = requestLine.split(" ");
+            
+            // Ensure that the request has the expected format (method, path, and HTTP version)
+            if (requestParts.length < 3) {
+                System.out.println("Malformed request line, responding with 400 Bad Request");
+                sendErrorResponse(writer, 400, "Bad Request");
+                clientSocket.close();
+                return;
+            }
 
             // Read the headers (finish when we encounter an empty line)
             String headerLine;
@@ -50,7 +67,7 @@ class ClientHandler implements Runnable {
             }
 
             // Process the request based on the method and path
-            if (requestParts.length >= 3 && requestParts[0].equalsIgnoreCase("GET")) {
+            if (requestParts[0].equalsIgnoreCase("GET")) {
                 String path = requestParts[1];  // The requested path (e.g., /index.html)
 
                 // Sanitize the path to prevent directory traversal attacks
@@ -65,13 +82,7 @@ class ClientHandler implements Runnable {
             } else {
                 // If the method is not GET
                 System.out.println("Method is not GET, responding with 405 Method Not Allowed");
-
-                // Respond with 405 Method Not Allowed
-                writer.write("HTTP/1.1 405 Method Not Allowed\n");
-                writer.write("Content-Type: text/html\n");
-                writer.write("\n");
-                writer.write("<html><body><h1>Method Not Allowed</h1></body></html>");
-                writer.flush();
+                sendErrorResponse(writer, 405, "Method Not Allowed");
             }
 
             clientSocket.close();
@@ -144,5 +155,14 @@ class ClientHandler implements Runnable {
                 e.printStackTrace();
             }
         }
+    }
+
+    // Helper method to send error responses
+    private void sendErrorResponse(Writer writer, int statusCode, String statusMessage) throws IOException {
+        writer.write("HTTP/1.1 " + statusCode + " " + statusMessage + "\n");
+        writer.write("Content-Type: text/html\n");
+        writer.write("\n");
+        writer.write("<html><body><h1>" + statusMessage + "</h1></body></html>");
+        writer.flush();
     }
 }
