@@ -25,7 +25,7 @@ import java.util.Random;
 
 class AzureLabTest {
     public static void main (String [] args) {
-	String emailAddress = Princewill.okube@city.ac.uk;
+	String emailAddress = "Princewill.okube@city.ac.uk" ;
 	if (false && emailAddress.indexOf('@') == -1) {
 	    System.err.println("Please set your e-mail address!");
 	    System.exit(1);
