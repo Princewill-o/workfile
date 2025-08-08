@@ -1,0 +1,8 @@
+No.     Time           Source                Destination           Protocol Length Info
+      1 0.000000       10.216.34.90          1.1.1.1               DNS      88     Standard query 0x1234 A moodle4-vip.city.ac.uk
+
+Frame 1: 88 bytes on wire (704 bits), 88 bytes captured (704 bits)
+Linux cooked capture v2
+Internet Protocol Version 4, Src: 10.216.34.90, Dst: 1.1.1.1
+User Datagram Protocol, Src Port: 50606, Dst Port: 53
+Domain Name System (query)

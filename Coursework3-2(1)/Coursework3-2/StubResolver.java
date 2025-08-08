@@ -1,0 +1,405 @@
+import java.net.*;
+import java.nio.ByteBuffer;
+import java.io.*;
+import java.util.Arrays;
+import java.util.List;
+import java.util.ArrayList;
+
+/**
+ * StubResolver - A simple DNS stub resolver that performs recursive queries
+ *
+ * This implementation manually constructs DNS packets and parses responses
+ * without using Java's built-in DNS libraries. It handles A, TXT, CNAME, 
+ * NS, and MX record types as required by the coursework.
+ *
+ * Key learning points:
+ * - DNS packet structure and byte-level manipulation
+ * - Recursive DNS resolution process
+ * - Handling different DNS record types
+ * - EDNS0 extension for modern DNS compatibility
+ *
+ * @author [Your Name]
+ * @version 1.0
+ */
+interface StubResolverInterface {
+    public void setNameServer(InetAddress ipAddress, int port) throws Exception;
+
+    public InetAddress recursiveResolveAddress(String domainName) throws Exception;
+
+    public String recursiveResolveText(String domainName) throws Exception;
+
+    public String recursiveResolveName(String domainName, int type) throws Exception;
+}
+
+public class StubResolver implements StubResolverInterface {
+    // Store the DNS server we'll send queries to
+    private InetAddress dnsServer;
+    private int serverPort;
+
+    /**
+     * Sets the DNS server to use for all queries
+     * This allows us to test with different DNS servers without hardcoding
+     */
+    public void setNameServer(InetAddress ipAddress, int port) throws Exception {
+        this.dnsServer = ipAddress;
+        this.serverPort = port;
+    }
+
+    // DNS record type constants - these are standard DNS protocol values
+    // I learned these from RFC 1035 and DNS documentation
+    private static final int RECORD_TYPE_A = 1;      // IPv4 address record
+    private static final int RECORD_TYPE_NS = 2;     // Nameserver record
+    private static final int RECORD_TYPE_CNAME = 5;  // Canonical name record
+    private static final int RECORD_TYPE_MX = 15;    // Mail exchange record
+    private static final int RECORD_TYPE_TXT = 16;   // Text record
+    private static final int CLASS_INTERNET = 1;     // IN class (Internet)
+
+    /**
+     * Resolves a domain name to an IPv4 address using recursive DNS
+     * This is the most common type of DNS query - converting domain names to IP addresses
+     */
+    public InetAddress recursiveResolveAddress(String domainName) throws Exception {
+        byte[] dnsResponse = performDNSQuery(domainName, RECORD_TYPE_A);
+        return extractIPAddress(dnsResponse);
+    }
+
+    /**
+     * Resolves TXT records for a domain name
+     * TXT records can contain various text information like SPF records,
+     * domain verification strings, etc.
+     *
+     * Note: Multiple TXT records are concatenated with spaces, which is
+     * the standard way to handle multiple TXT records for a domain.
+     */
+    public String recursiveResolveText(String domainName) throws Exception {
+        byte[] responseData = performDNSQuery(domainName, RECORD_TYPE_TXT);
+        int answerCount = extractAnswerCount(responseData);
+
+        if (answerCount == 0) return null;
+
+        int currentPosition = findAnswerSectionStart(responseData);
+        StringBuilder combinedTxtRecords = new StringBuilder();
+
+        // Process each answer record in the response
+        for (int recordIndex = 0; recordIndex < answerCount; recordIndex++) {
+            currentPosition = advancePastName(responseData, currentPosition);
+            int recordType = extractRecordType(responseData, currentPosition);
+            currentPosition += 2; // Skip TYPE field
+            currentPosition += 2; // Skip CLASS field
+            currentPosition += 4; // Skip TTL field
+            int dataLength = extractDataLength(responseData, currentPosition);
+            currentPosition += 2;
+
+            if (recordType == RECORD_TYPE_TXT) {
+                // TXT records have a special format: length byte followed by text
+                int dataEnd = currentPosition + dataLength;
+                while (currentPosition < dataEnd) {
+                    int textLength = responseData[currentPosition++] & 0xFF;
+                    if (currentPosition + textLength > dataEnd) break; // Safety check
+                    combinedTxtRecords.append(new String(responseData, currentPosition, textLength, "UTF-8")).append(" ");
+                    currentPosition += textLength;
+                }
+            } else {
+                currentPosition += dataLength; // Skip other record types
+            }
+        }
+
+        return combinedTxtRecords.length() > 0 ? combinedTxtRecords.toString().trim() : null;
+    }
+
+    /**
+     * Resolves CNAME, NS, or MX records for a domain
+     * These records return domain names rather than IP addresses
+     */
+    public String recursiveResolveName(String domainName, int type) throws Exception {
+        if (!(type == RECORD_TYPE_NS || type == RECORD_TYPE_MX || type == RECORD_TYPE_CNAME))
+            throw new IllegalArgumentException("Unsupported record type. Only NS, MX, CNAME are supported.");
+
+        byte[] responseData = performDNSQuery(domainName, type);
+
+        int answerCount = extractAnswerCount(responseData);
+        if (answerCount == 0) return null;
+
+        int currentPosition = findAnswerSectionStart(responseData);
+
+        // Look for the requested record type in the answer section
+        for (int recordIndex = 0; recordIndex < answerCount; recordIndex++) {
+            currentPosition = advancePastName(responseData, currentPosition);
+            int recordType = extractRecordType(responseData, currentPosition);
+            currentPosition += 8; // Skip type + class + TTL
+            int dataLength = extractDataLength(responseData, currentPosition);
+            currentPosition += 2;
+            if (recordType == type) {
+                if (type == RECORD_TYPE_MX) {
+                    // MX records have format: 2-byte priority + domain name
+                    int priority = ((responseData[currentPosition] & 0xFF) << 8) | (responseData[currentPosition + 1] & 0xFF);
+                    String mxDomain = extractDomainName(responseData, currentPosition + 2);
+                    return priority + " " + mxDomain;
+                } else {
+                    // NS and CNAME records just have the domain name
+                    return extractDomainName(responseData, currentPosition);
+                }
+            } else {
+                currentPosition += dataLength;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Performs the actual DNS query by sending a UDP packet to the DNS server
+     * This is the core networking part of the stub resolver
+     */
+    private byte[] performDNSQuery(String domainName, int queryType) throws Exception {
+        DatagramSocket networkSocket = new DatagramSocket();
+        networkSocket.setSoTimeout(5000); // 5 second timeout to avoid hanging
+
+        byte[] queryPacket = constructQueryPacket(domainName, queryType);
+
+        DatagramPacket outgoingPacket = new DatagramPacket(queryPacket, queryPacket.length, dnsServer, serverPort);
+        networkSocket.send(outgoingPacket);
+
+        byte[] responseBuffer = new byte[4096]; // Large enough for most DNS responses
+        DatagramPacket incomingPacket = new DatagramPacket(responseBuffer, responseBuffer.length);
+        networkSocket.receive(incomingPacket);
+        networkSocket.close();
+
+        return Arrays.copyOf(incomingPacket.getData(), incomingPacket.getLength());
+    }
+
+    /**
+     * Constructs a DNS query packet manually
+     * This is where I learned about DNS packet structure:
+     * - 12-byte header with various flags and counts
+     * - Domain name in length-prefixed format
+     * - Query type and class
+     * - Optional EDNS0 extension for modern DNS features
+     */
+    private byte[] constructQueryPacket(String domainName, int queryType) throws IOException {
+        ByteArrayOutputStream packetBuilder = new ByteArrayOutputStream();
+        DataOutputStream dataWriter = new DataOutputStream(packetBuilder);
+
+        // DNS Header (12 bytes total)
+        dataWriter.writeShort(0x1234); // Transaction ID - helps match queries to responses
+        dataWriter.writeShort(0x0100); // Flags: Standard Query (0x0000) + Recursion Desired (0x0100)
+        dataWriter.writeShort(1);      // QDCOUNT: 1 question
+        dataWriter.writeShort(0);      // ANCOUNT: 0 answers (we're asking, not answering)
+        dataWriter.writeShort(0);      // NSCOUNT: 0 authority records
+        dataWriter.writeShort(1);      // ARCOUNT: 1 additional record (EDNS0 OPT record)
+
+        // Question Section: Domain name in DNS format
+        // Each label is prefixed with its length, ending with 0
+        String[] domainParts = domainName.split("\\.");
+        for (String part : domainParts) {
+            if (!part.isEmpty()) {
+                byte[] partBytes = part.getBytes("UTF-8");
+                dataWriter.writeByte(partBytes.length); // Length of this label
+                dataWriter.write(partBytes);            // The actual label
+            }
+        }
+        dataWriter.writeByte(0);           // End of domain name (null terminator)
+        dataWriter.writeShort(queryType);  // Query type (A=1, TXT=16, etc.)
+        dataWriter.writeShort(CLASS_INTERNET); // Class IN (Internet)
+
+        // EDNS0 OPT pseudo-record for modern DNS compatibility
+        // This tells the server we can handle larger responses and modern DNS features
+        dataWriter.writeByte(0);           // Root label (empty name)
+        dataWriter.writeShort(41);         // OPT record type
+        dataWriter.writeShort(4096);       // UDP payload size (maximum)
+        dataWriter.writeByte(0);           // Extended RCODE
+        dataWriter.writeByte(0);           // EDNS version
+        dataWriter.writeShort(0x0000);     // Z flags (DNSSEC OK bit = 0)
+        dataWriter.writeShort(0);          // RDLENGTH = 0 (no options)
+
+        return packetBuilder.toByteArray();
+    }
+
+    /**
+     * Extracts an IPv4 address from a DNS response
+     * Looks through the answer section for A records
+     */
+    private InetAddress extractIPAddress(byte[] responseData) throws Exception {
+        int answerCount = extractAnswerCount(responseData);
+        if (answerCount == 0) return null;
+
+        int currentPosition = findAnswerSectionStart(responseData);
+
+        // Search through all answer records
+        for (int recordIndex = 0; recordIndex < answerCount; recordIndex++) {
+            currentPosition = advancePastName(responseData, currentPosition);
+            int recordType = extractRecordType(responseData, currentPosition);
+            currentPosition += 8; // Skip type + class + TTL
+            int dataLength = extractDataLength(responseData, currentPosition);
+            currentPosition += 2;
+            if (recordType == RECORD_TYPE_A) {
+                // A record data is exactly 4 bytes (IPv4 address)
+                return InetAddress.getByAddress(Arrays.copyOfRange(responseData, currentPosition, currentPosition + dataLength));
+            } else {
+                currentPosition += dataLength; // Skip other record types
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Finds the start of the answer section in a DNS response
+     * This involves skipping the header and question section
+     */
+    private int findAnswerSectionStart(byte[] responseData) throws IOException {
+        int position = 12; // Skip DNS header (12 bytes)
+        while (responseData[position] != 0) position += (responseData[position] & 0xFF) + 1;
+        position += 5; // Skip null terminator + QTYPE + QCLASS
+        return position;
+    }
+
+    /**
+     * Advances past a domain name in DNS packet format
+     * Handles both regular labels and compression pointers
+     */
+    private int advancePastName(byte[] responseData, int position) {
+        while (true) {
+            int length = responseData[position] & 0xFF;
+            if (length == 0) return position + 1; // End of name
+            if ((length & 0xC0) == 0xC0) return position + 2; // Compression pointer (2 bytes)
+            position += length + 1; // Regular label: length + label bytes
+        }
+    }
+
+    /**
+     * Extracts a domain name from DNS packet format
+     * Handles DNS name compression (pointers to earlier names)
+     * This was tricky to implement correctly!
+     */
+    private String extractDomainName(byte[] responseData, int position) {
+        StringBuilder domainBuilder = new StringBuilder();
+        while (true) {
+            int length = responseData[position] & 0xFF;
+            if (length == 0) break; // End of name
+            if ((length & 0xC0) == 0xC0) {
+                // DNS compression: pointer to earlier name
+                int pointer = ((length & 0x3F) << 8) | (responseData[position + 1] & 0xFF);
+                domainBuilder.append(extractDomainName(responseData, pointer));
+                break;
+            } else {
+                // Regular label: read the bytes and convert to string
+                position++;
+                for (int i = 0; i < length; i++) {
+                    domainBuilder.append((char) responseData[position++]);
+                }
+                domainBuilder.append(".");
+            }
+        }
+        return domainBuilder.toString();
+    }
+
+    /**
+     * Extracts the answer count from DNS header
+     * This tells us how many answer records to expect
+     */
+    private int extractAnswerCount(byte[] responseData) {
+        return ((responseData[6] & 0xFF) << 8) | (responseData[7] & 0xFF);
+    }
+
+    /**
+     * Extracts record type from a DNS record
+     * Used to identify what type of record we're looking at
+     */
+    private int extractRecordType(byte[] responseData, int position) {
+        return ((responseData[position] & 0xFF) << 8) | (responseData[position + 1] & 0xFF);
+    }
+
+    /**
+     * Extracts the data length from a DNS record
+     * Tells us how many bytes of data follow
+     */
+    private int extractDataLength(byte[] responseData, int position) {
+        return ((responseData[position] & 0xFF) << 8) | (responseData[position + 1] & 0xFF);
+    }
+
+    // Debug methods for compatibility with test framework
+    // These are kept for testing purposes but aren't part of the main functionality
+    public byte[] sendQueryDebug(String domainName, int type) throws Exception {
+        return performDNSQuery(domainName, type);
+    }
+
+    public byte[] buildQueryDebug(String domain, int type) {
+        try {
+            return constructQueryPacket(domain, type);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    public void skipQuestionDebug(ByteBuffer buffer, byte[] response) throws Exception {
+        // Compatibility method - not used in this implementation
+    }
+
+    public String parseNameDebug(ByteBuffer buffer, byte[] response) throws Exception {
+        // Compatibility method - not used in this implementation
+        return "";
+    }
+
+    /**
+     * RecordType enum for DNS record types
+     * Used by the temporary tests to specify which record type to query
+     */
+    public enum RecordType {
+        A(1), NS(2), CNAME(5), MX(15), TXT(16);
+        
+        private final int value;
+        
+        RecordType(int value) {
+            this.value = value;
+        }
+        
+        public int getValue() {
+            return value;
+        }
+    }
+
+    /**
+     * ResourceRecord class to represent DNS resource records
+     * Used by the temporary tests to display record information
+     */
+    public static class ResourceRecord {
+        private String name;
+        private RecordType type;
+        private String data;
+        
+        public ResourceRecord(String name, RecordType type, String data) {
+            this.name = name;
+            this.type = type;
+            this.data = data;
+        }
+        
+        public String getName() { return name; }
+        public RecordType getType() { return type; }
+        public String getData() { return data; }
+        
+        @Override
+        public String toString() {
+            return name + "\t" + type.name() + "\t" + data;
+        }
+    }
+
+    /**
+     * getAnswers method for the temporary tests
+     * Returns a list of ResourceRecord objects for the specified domain and record type
+     */
+    public List<ResourceRecord> getAnswers(String domainName, RecordType recordType) throws Exception {
+        List<ResourceRecord> records = new ArrayList<>();
+        
+        // Remove trailing dot if present for consistency
+        String cleanDomain = domainName.endsWith(".") ? domainName.substring(0, domainName.length() - 1) : domainName;
+        
+        // Use the existing recursiveResolveName method to get the result
+        String result = recursiveResolveName(cleanDomain + ".", recordType.getValue());
+        
+        if (result != null) {
+            // Create a ResourceRecord with the result
+            records.add(new ResourceRecord(cleanDomain + ".", recordType, result));
+        }
+        
+        return records;
+    }
+}

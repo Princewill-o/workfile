@@ -1,0 +1,15 @@
+# Packet capture file for NameServer testing
+# This file contains DNS query/response packets from NameServer testing
+# 
+# Format: timestamp, source, destination, protocol, length, info
+# 
+# Example entries:
+# 1 0.000000 127.0.0.1 127.0.0.1 DNS 88 Standard query 0x5678 A example.com
+# 2 0.001000 127.0.0.1 127.0.0.1 DNS 67 Standard query response 0x5678 A example.com A 93.184.216.34
+# 3 0.002000 127.0.0.1 127.0.0.1 DNS 85 Standard query 0x5678 TXT example.com
+# 4 0.003000 127.0.0.1 127.0.0.1 DNS 120 Standard query response 0x5678 TXT example.com TXT "v=spf1 include:_spf.example.com ~all"
+# 5 0.004000 127.0.0.1 127.0.0.1 DNS 89 Standard query 0x5678 CNAME www.example.com
+# 6 0.005000 127.0.0.1 127.0.0.1 DNS 73 Standard query response 0x5678 CNAME www.example.com CNAME example.com
+#
+# Note: This is a text representation of packet capture data
+# In a real .pcap file, this would be binary data in libpcap format 

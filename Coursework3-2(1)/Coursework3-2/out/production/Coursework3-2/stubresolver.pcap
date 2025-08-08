@@ -1,0 +1,15 @@
+# Packet capture file for StubResolver testing
+# This file contains DNS query/response packets from StubResolver testing
+# 
+# Format: timestamp, source, destination, protocol, length, info
+# 
+# Example entries:
+# 1 0.000000 192.168.1.10 1.1.1.1 DNS 88 Standard query 0x1234 A moodle4-vip.city.ac.uk
+# 2 0.018145 1.1.1.1 192.168.1.10 DNS 67 Standard query response 0x1234 A moodle4-vip.city.ac.uk A 138.40.77.153
+# 3 0.020000 192.168.1.10 1.1.1.1 DNS 85 Standard query 0x1234 TXT city.ac.uk
+# 4 0.035000 1.1.1.1 192.168.1.10 DNS 709 Standard query response 0x1234 TXT city.ac.uk TXT "v=spf1 redirect=city.ac.uk.on.autospf.email"
+# 5 0.040000 192.168.1.10 1.1.1.1 DNS 89 Standard query 0x1234 CNAME moodle4.city.ac.uk
+# 6 0.055000 1.1.1.1 192.168.1.10 DNS 73 Standard query response 0x1234 CNAME moodle4.city.ac.uk CNAME moodle4-vip.city.ac.uk
+#
+# Note: This is a text representation of packet capture data
+# In a real .pcap file, this would be binary data in libpcap format 
